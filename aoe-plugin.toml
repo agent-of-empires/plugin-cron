@@ -1,0 +1,128 @@
+# Cron -- an Agent of Empires plugin.
+#
+# Manifest schema: aoe-plugin-api/src/manifest.rs in agent-of-empires. The host
+# parses this strictly (deny_unknown_fields), so every key must match a field in
+# that schema. Field-by-field reference:
+# https://agent-of-empires.com/docs/api/plugin-api/
+
+id = "agent-of-empires.cron"
+name = "Cron"
+version = "0.1.0"
+# Manifest schema / host API version. The structured settings widgets and the
+# session-driving RPCs this plugin relies on are api_version 9.
+api_version = 9
+# Host-app compatibility range (a different axis from api_version). api_version 9
+# first ships in aoe 1.13, so an older host that predates the contract refuses
+# the install instead of half-loading it.
+aoe_version = ">=1.13.0, <2.0.0"
+description = "Run Agent of Empires sessions on a cron schedule."
+
+# Capability grants are prompted at install and pinned to the manifest hash.
+# - runtime.worker: run the worker at all.
+# - session.create: create the scheduled session.
+# - session.prompt: deliver the job's prompt as the session's first turn.
+# - session.unattended: a hands-off schedule usually picks an unattended
+#   approval mode; the host classifies the mode and requires this distinct grant
+#   for one, on top of repository trust (which it always enforces).
+# The worker does not call acp.capabilities.get: the host resolves the agent /
+# model / mode / project pickers when it renders these settings, and revalidates
+# the saved ids when the session is actually created.
+capabilities = [
+    "runtime.worker",
+    "session.create",
+    "session.prompt",
+    "session.unattended",
+]
+
+# The scheduled jobs, edited through the host-rendered settings surfaces (TUI and
+# web) and stored under [plugins."agent-of-empires.cron".settings]. The worker
+# reads the list back via config.get and re-reads it on plugin.settings.changed.
+# Each row carries a host-generated stable `id` (item_id_key) the worker uses to
+# track a job across edits.
+[[settings]]
+key = "jobs"
+label = "Scheduled jobs"
+description = "Sessions to launch on a cron schedule."
+type = "object_list"
+item_id_key = "id"
+max_items = 50
+
+[[settings.fields]]
+key = "name"
+label = "Name"
+description = "Label for the job; also titles the spawned session."
+type = "string"
+required = true
+
+[[settings.fields]]
+key = "schedule"
+label = "Schedule"
+description = "Cron expression (min hour dom mon dow), daemon-host local time."
+type = "cron"
+required = true
+
+[[settings.fields]]
+key = "agent_id"
+label = "Agent"
+description = "Which agent runs the session."
+type = "dynamic_select"
+option_source = "acp.agents"
+required = true
+
+[[settings.fields]]
+key = "model_id"
+label = "Model"
+description = "Model override; leave empty for the agent default."
+type = "dynamic_select"
+option_source = "acp.models"
+depends_on = ["agent_id"]
+
+[[settings.fields]]
+key = "mode_id"
+label = "Approval mode"
+description = "ACP approval mode. An unattended mode needs the session.unattended grant and a trusted repository."
+type = "dynamic_select"
+option_source = "acp.modes"
+depends_on = ["agent_id"]
+
+[[settings.fields]]
+key = "project_path"
+label = "Project"
+description = "Project the session runs in. Required (the host demands a trust-checked project path)."
+type = "dynamic_select"
+option_source = "projects"
+required = true
+
+[[settings.fields]]
+key = "prompt"
+label = "Prompt"
+description = "Prompt delivered to the session's first turn."
+type = "string"
+required = true
+
+[[settings.fields]]
+key = "group"
+label = "Group"
+description = "Session group the scheduled sessions are filed under."
+type = "string"
+default = "Scheduled"
+
+[[settings.fields]]
+key = "enabled"
+label = "Enabled"
+description = "Whether the scheduler fires this job."
+type = "boolean"
+default = true
+
+# Tier 1 worker: the executable the host spawns and supervises, speaking ndjson
+# JSON-RPC over stdio. The entrypoint MUST be plugin-relative so the daemon's
+# PATH never decides whether the worker launches. The build step runs in the
+# user's interactive shell at install/update and builds into .aoe-build/ (the
+# host's BUILD_OUTPUT_DIR), which the host excludes from the plugin tree hash.
+[runtime]
+kind = "command"
+command = [".aoe-build/cargo-target/release/plugin-cron-worker"]
+
+[[runtime.build]]
+command = ["cargo", "build", "--release", "--target-dir", ".aoe-build/cargo-target"]
+platforms = ["linux", "macos"]
