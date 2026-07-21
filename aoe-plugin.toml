@@ -8,9 +8,10 @@
 id = "agent-of-empires.cron"
 name = "Cron"
 version = "0.1.0"
-# Manifest schema / host API version. The structured settings widgets and the
-# session-driving RPCs this plugin relies on are api_version 9.
-api_version = 9
+# Manifest schema / host API version. The session-driving RPCs are api_version
+# 9; the multi-select project picker (dynamic_multi_select) and optional
+# project (scratch sessions) are api_version 11.
+api_version = 11
 # Host-app compatibility range (a different axis from api_version). api_version 9
 # first ships in aoe 1.13, so an older host that predates the contract refuses
 # the install instead of half-loading it.
@@ -86,12 +87,11 @@ option_source = "acp.modes"
 depends_on = ["agent_id"]
 
 [[settings.fields]]
-key = "project_path"
-label = "Project"
-description = "Project the session runs in. Required (the host demands a trust-checked project path)."
-type = "dynamic_select"
+key = "project_paths"
+label = "Projects"
+description = "Projects the session runs in. Select none for a scratch session; the first is the primary repo and any others become additional repos of a multi-repo session."
+type = "dynamic_multi_select"
 option_source = "projects"
-required = true
 
 [[settings.fields]]
 key = "prompt"

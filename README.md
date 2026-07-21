@@ -80,9 +80,6 @@ only proposes:
 
 ## Known limits
 
-- **No project-less jobs.** The host's session-create requires a trust-checked
-  project path, so every job needs a project. Project-less scheduling is tracked
-  as host follow-up.
 - **No sub-agent selection.** Picking a named sub-agent / persona with scoped
   permissions at spawn is not expressible through the current host API; it is
   tracked separately (plugin-cron#1).
