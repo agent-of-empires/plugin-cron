@@ -56,6 +56,10 @@ pub fn create_session(
             params["extra_project_paths"] = json!(extras);
         }
     }
+    // Opt into the host sandbox; omit the key when off so the default stands.
+    if job.sandbox {
+        params["sandbox"] = json!(true);
+    }
     if let Some(model) = non_empty(&job.model_id) {
         params["model_id"] = json!(model);
     }
@@ -126,6 +130,7 @@ mod tests {
             model_id: None,
             mode_id: None,
             project_paths: vec!["/repo".to_string()],
+            sandbox: false,
             prompt: "run nightly".to_string(),
             group: "Scheduled".to_string(),
         }
@@ -171,6 +176,18 @@ mod tests {
         assert!(params.get("mode_id").is_none());
         // A single project sends no extra repos.
         assert!(params.get("extra_project_paths").is_none());
+        // Sandbox off -> key omitted, not sent as false.
+        assert!(params.get("sandbox").is_none());
+    }
+
+    #[test]
+    fn create_session_sets_sandbox_when_enabled() {
+        let mock = Mock::new(json!({ "session_id": "s1", "created": true }));
+        let mut j = job();
+        j.sandbox = true;
+        create_session(&mock, &j, "k").unwrap();
+        let (_, params) = mock.last.borrow().clone().unwrap();
+        assert_eq!(params["sandbox"], json!(true));
     }
 
     #[test]

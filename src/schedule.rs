@@ -49,6 +49,11 @@ pub struct Job {
     /// paths become additional repos of a multi-repo session.
     #[serde(default)]
     pub project_paths: Vec<String>,
+    /// Run the session inside the host sandbox (a container). Off by default;
+    /// the host uses its configured sandbox image and fails the create if no
+    /// container runtime is available.
+    #[serde(default)]
+    pub sandbox: bool,
     /// Prompt delivered to the session's first turn.
     pub prompt: String,
     #[serde(default = "default_group")]
@@ -183,6 +188,7 @@ mod tests {
             model_id: None,
             mode_id: None,
             project_paths: vec!["/tmp/project".to_string()],
+            sandbox: false,
             prompt: "check open PRs".to_string(),
             group: DEFAULT_GROUP.to_string(),
         }

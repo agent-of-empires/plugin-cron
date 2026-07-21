@@ -94,10 +94,18 @@ type = "dynamic_multi_select"
 option_source = "projects"
 
 [[settings.fields]]
+key = "sandbox"
+label = "Sandbox"
+description = "Run the session inside the host sandbox (a container). Needs a container runtime on the daemon host."
+type = "boolean"
+default = false
+
+[[settings.fields]]
 key = "prompt"
 label = "Prompt"
 description = "Prompt delivered to the session's first turn."
 type = "string"
+multiline = true
 required = true
 
 [[settings.fields]]
