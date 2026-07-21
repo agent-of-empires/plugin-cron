@@ -44,9 +44,11 @@ pub struct Job {
     /// `session.unattended` grant plus a trusted repository.
     #[serde(default)]
     pub mode_id: Option<String>,
-    /// Project working path. Required: the host's `sessions.create` demands a
-    /// trust-checked project path, so project-less jobs are not supported.
-    pub project_path: String,
+    /// Project working paths. Empty means no project: the host runs a scratch
+    /// session. The first path is the primary (trust-checked) repo; any extra
+    /// paths become additional repos of a multi-repo session.
+    #[serde(default)]
+    pub project_paths: Vec<String>,
     /// Prompt delivered to the session's first turn.
     pub prompt: String,
     #[serde(default = "default_group")]
@@ -180,7 +182,7 @@ mod tests {
             agent_id: "claude".to_string(),
             model_id: None,
             mode_id: None,
-            project_path: "/tmp/project".to_string(),
+            project_paths: vec!["/tmp/project".to_string()],
             prompt: "check open PRs".to_string(),
             group: DEFAULT_GROUP.to_string(),
         }
@@ -200,11 +202,12 @@ mod tests {
             "name": "nightly",
             "schedule": "0 3 * * *",
             "agent_id": "claude",
-            "project_path": "/repo",
+            "project_paths": ["/repo"],
             "prompt": "run nightly"
         });
         let j: Job = serde_json::from_value(v).unwrap();
         assert!(j.enabled);
+        assert_eq!(j.project_paths, vec!["/repo".to_string()]);
         assert_eq!(j.group, "Scheduled");
         assert_eq!(j.model_id, None);
         assert_eq!(j.mode_id, None);

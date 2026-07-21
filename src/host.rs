@@ -36,12 +36,26 @@ pub fn create_session(
 ) -> Result<CreateOutcome, RpcError> {
     let mut params = json!({
         "agent_id": job.agent_id,
-        "project_path": job.project_path,
         "title": job.name,
         "group": job.group,
         "initial_turn": { "text": job.prompt },
         "idempotency_key": format!("{}:{}", job.id, fire_key),
     });
+    // Map the selected projects onto the host contract: first is the primary
+    // (trust-checked) repo, the rest are extra repos. No projects -> omit
+    // project_path entirely so the host provisions a scratch session.
+    let projects: Vec<&str> = job
+        .project_paths
+        .iter()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .collect();
+    if let Some((primary, extras)) = projects.split_first() {
+        params["project_path"] = json!(primary);
+        if !extras.is_empty() {
+            params["extra_project_paths"] = json!(extras);
+        }
+    }
     if let Some(model) = non_empty(&job.model_id) {
         params["model_id"] = json!(model);
     }
@@ -111,7 +125,7 @@ mod tests {
             agent_id: "claude".to_string(),
             model_id: None,
             mode_id: None,
-            project_path: "/repo".to_string(),
+            project_paths: vec!["/repo".to_string()],
             prompt: "run nightly".to_string(),
             group: "Scheduled".to_string(),
         }
@@ -128,7 +142,7 @@ mod tests {
         let mock = Mock::new(json!({
             "value": [{
                 "id": "x", "name": "n", "schedule": "0 8 * * *",
-                "agent_id": "claude", "project_path": "/r", "prompt": "p"
+                "agent_id": "claude", "project_paths": ["/r"], "prompt": "p"
             }],
             "revision": 1
         }));
@@ -155,6 +169,40 @@ mod tests {
         // Unset model / mode must be omitted, not sent as empty strings.
         assert!(params.get("model_id").is_none());
         assert!(params.get("mode_id").is_none());
+        // A single project sends no extra repos.
+        assert!(params.get("extra_project_paths").is_none());
+    }
+
+    #[test]
+    fn create_session_omits_project_for_scratch() {
+        let mock = Mock::new(json!({ "session_id": "s1", "created": true }));
+        let mut j = job();
+        j.project_paths = Vec::new();
+        create_session(&mock, &j, "k").unwrap();
+        let (_, params) = mock.last.borrow().clone().unwrap();
+        // No project selected -> omit project_path so the host runs a scratch
+        // session; never send an empty string.
+        assert!(params.get("project_path").is_none());
+        assert!(params.get("extra_project_paths").is_none());
+    }
+
+    #[test]
+    fn create_session_maps_multi_repo() {
+        let mock = Mock::new(json!({ "session_id": "s1", "created": true }));
+        let mut j = job();
+        j.project_paths = vec![
+            "/repo/app".to_string(),
+            "  ".to_string(), // blank entries are dropped
+            "/repo/lib".to_string(),
+            "/repo/proto".to_string(),
+        ];
+        create_session(&mock, &j, "k").unwrap();
+        let (_, params) = mock.last.borrow().clone().unwrap();
+        assert_eq!(params["project_path"], "/repo/app");
+        assert_eq!(
+            params["extra_project_paths"],
+            json!(["/repo/lib", "/repo/proto"])
+        );
     }
 
     #[test]
