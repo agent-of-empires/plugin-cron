@@ -50,12 +50,19 @@ pub fn create_session(
     }
 
     let response = caller.call("sessions.create", params)?;
+    // A response without a usable session_id is a host-contract violation, not a
+    // success: surface it rather than reporting a "fired" job with an empty id.
+    let session_id = response
+        .get("session_id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| RpcError {
+            code: -32603,
+            message: "sessions.create response missing session_id".to_string(),
+        })?
+        .to_string();
     Ok(CreateOutcome {
-        session_id: response
-            .get("session_id")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
+        session_id,
         created: response
             .get("created")
             .and_then(Value::as_bool)
@@ -148,6 +155,16 @@ mod tests {
         // Unset model / mode must be omitted, not sent as empty strings.
         assert!(params.get("model_id").is_none());
         assert!(params.get("mode_id").is_none());
+    }
+
+    #[test]
+    fn create_session_rejects_response_without_session_id() {
+        // A success-shaped response lacking a usable session_id is a contract
+        // violation, not a silent empty-id "fired" success.
+        let missing = Mock::new(json!({ "created": true }));
+        assert!(create_session(&missing, &job(), "k").is_err());
+        let blank = Mock::new(json!({ "session_id": "", "created": true }));
+        assert!(create_session(&blank, &job(), "k").is_err());
     }
 
     #[test]
