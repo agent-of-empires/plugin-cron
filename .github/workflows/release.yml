@@ -1,0 +1,37 @@
+name: Release
+
+# Tag vX.Y.Z to publish a GitHub Release with a source archive and its sha256.
+# Agent of Empires can install the plugin from the archive (or from source).
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
+      - name: Build source archive
+        run: |
+          TAG=${{ github.ref_name }}
+          NAME=plugin-cron-${TAG}
+          git archive --format=tar.gz --prefix="${NAME}/" -o "${NAME}.tar.gz" HEAD
+          sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=${{ github.ref_name }}
+          NAME=plugin-cron-${TAG}
+          gh release create "${TAG}" \
+            --title "${TAG}" \
+            --generate-notes \
+            "${NAME}.tar.gz" "${NAME}.tar.gz.sha256"
