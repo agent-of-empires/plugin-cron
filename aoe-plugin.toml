@@ -7,15 +7,16 @@
 
 id = "agent-of-empires.cron"
 name = "Cron"
-version = "0.1.0"
+version = "1.0.0"
 # Manifest schema / host API version. The session-driving RPCs are api_version
 # 9; the multi-select project picker (dynamic_multi_select) and optional
 # project (scratch sessions) are api_version 11.
 api_version = 11
-# Host-app compatibility range (a different axis from api_version). api_version 9
-# first ships in aoe 1.13, so an older host that predates the contract refuses
+# Host-app compatibility range (a different axis from api_version). This plugin
+# needs api_version 11 (multi-select projects, scratch/multi-repo sessions,
+# sandbox, multiline), which first ships in aoe 1.14, so an older host refuses
 # the install instead of half-loading it.
-aoe_version = ">=1.13.0, <2.0.0"
+aoe_version = ">=1.14.0, <2.0.0"
 description = "Run Agent of Empires sessions on a cron schedule."
 
 # Capability grants are prompted at install and pinned to the manifest hash.
