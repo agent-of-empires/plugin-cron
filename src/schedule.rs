@@ -145,6 +145,28 @@ pub fn plan_tick<Tz: chrono::TimeZone>(
     (fires, next)
 }
 
+/// Roll back the cursors of jobs whose session creation failed, restoring their
+/// pre-tick state so the occurrence stays in the next window and retries. Jobs
+/// that fired successfully (or did not fire) keep their advanced cursor.
+///
+/// `plan_tick` advances a fired job's cursor optimistically; the scheduler
+/// calls this after attempting each create so a transient `sessions.create`
+/// failure does not silently drop the occurrence. A retry is safe: the host
+/// idempotency key (`job_id:fire_minute`) collapses a duplicate if the failed
+/// create had in fact taken effect.
+pub fn restore_failed_cursors<Tz: chrono::TimeZone>(
+    prev: &Cursors<Tz>,
+    mut next: Cursors<Tz>,
+    failed: &[String],
+) -> Cursors<Tz> {
+    for id in failed {
+        if let Some(prev_cursor) = prev.get(id) {
+            next.insert(id.clone(), prev_cursor.clone());
+        }
+    }
+    next
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,6 +327,33 @@ mod tests {
             &utc(2026, 7, 16, 8, 30),
         );
         assert!(fires.is_empty());
+    }
+
+    #[test]
+    fn restored_cursor_refires_on_next_tick() {
+        // A fired job whose create failed is rolled back, so the same
+        // occurrence is still in the window on the next tick and fires again.
+        let jobs = vec![job("a", "0 8 * * *")];
+        let (_, c0) = plan_tick(&jobs, &Cursors::new(), &utc(2026, 7, 16, 7, 0));
+        let (fires, c1) = plan_tick(&jobs, &c0, &utc(2026, 7, 16, 8, 30));
+        assert_eq!(fires, vec!["a".to_string()]);
+        // Simulate the create failing for job "a".
+        let c1 = restore_failed_cursors(&c0, c1, &fires);
+        let (fires2, _) = plan_tick(&jobs, &c1, &utc(2026, 7, 16, 8, 31));
+        assert_eq!(fires2, vec!["a".to_string()], "a failed fire must retry");
+    }
+
+    #[test]
+    fn successful_fire_is_not_rolled_back() {
+        // With no failures, the advanced cursor stands and the job does not
+        // refire (the empty failed-list is a no-op).
+        let jobs = vec![job("a", "0 8 * * *")];
+        let (_, c0) = plan_tick(&jobs, &Cursors::new(), &utc(2026, 7, 16, 7, 0));
+        let (fires, c1) = plan_tick(&jobs, &c0, &utc(2026, 7, 16, 8, 30));
+        assert_eq!(fires, vec!["a".to_string()]);
+        let c1 = restore_failed_cursors(&c0, c1, &[]);
+        let (fires2, _) = plan_tick(&jobs, &c1, &utc(2026, 7, 16, 8, 31));
+        assert!(fires2.is_empty(), "a successful fire must not refire");
     }
 
     #[test]

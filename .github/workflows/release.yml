@@ -15,21 +15,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
       - run: cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
       - name: Build source archive
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
-          TAG=${{ github.ref_name }}
           NAME=plugin-cron-${TAG}
           git archive --format=tar.gz --prefix="${NAME}/" -o "${NAME}.tar.gz" HEAD
           sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
         run: |
-          TAG=${{ github.ref_name }}
           NAME=plugin-cron-${TAG}
           gh release create "${TAG}" \
             --title "${TAG}" \

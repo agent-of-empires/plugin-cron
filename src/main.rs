@@ -16,7 +16,7 @@ use std::time::Duration;
 use chrono::Local;
 
 use rpc::Peer;
-use schedule::{plan_tick, Cursors};
+use schedule::{plan_tick, restore_failed_cursors, Cursors};
 
 /// Poll cadence between settings-change wakeups. Cron granularity is one minute,
 /// so a sub-minute tick guarantees every occurrence lands in some window; a
@@ -31,11 +31,13 @@ fn main() {
 
     let (peer, notify_rx) = Peer::start();
 
-    let mut jobs = match host::fetch_jobs(peer.as_ref()) {
-        Ok(jobs) => jobs,
+    // `jobs_stale` records a failed fetch so the tick loop retries it, rather
+    // than running with zero jobs until the next settings-change push.
+    let (mut jobs, mut jobs_stale) = match host::fetch_jobs(peer.as_ref()) {
+        Ok(jobs) => (jobs, false),
         Err(e) => {
             eprintln!("initial config.get failed: {}", e.message);
-            Vec::new()
+            (Vec::new(), true)
         }
     };
 
@@ -48,9 +50,13 @@ fn main() {
             Ok(notification) => {
                 if notification.method.ends_with("settings.changed") {
                     match host::fetch_jobs(peer.as_ref()) {
-                        Ok(fresh) => jobs = fresh,
+                        Ok(fresh) => {
+                            jobs = fresh;
+                            jobs_stale = false;
+                        }
                         Err(e) => {
-                            eprintln!("config.get after settings change failed: {}", e.message)
+                            eprintln!("config.get after settings change failed: {}", e.message);
+                            jobs_stale = true;
                         }
                     }
                 }
@@ -62,16 +68,30 @@ fn main() {
             }
         }
 
+        // Self-heal a failed initial (or post-change) fetch: retry once per tick
+        // while stale, so a transient error does not leave the worker jobless
+        // until the next settings edit.
+        if jobs_stale {
+            match host::fetch_jobs(peer.as_ref()) {
+                Ok(fresh) => {
+                    jobs = fresh;
+                    jobs_stale = false;
+                }
+                Err(e) => eprintln!("config.get retry failed: {}", e.message),
+            }
+        }
+
         let now = Local::now();
         let (fires, next) = plan_tick(&jobs, &cursors, &now);
-        cursors = next;
         if fires.is_empty() {
+            cursors = next;
             continue;
         }
 
         // Minute-granular fire key: stable across the few seconds between the
         // occurrence and this tick, so the host idempotency key does not drift.
         let fire_key = now.format("%Y-%m-%dT%H:%M").to_string();
+        let mut failed = Vec::new();
         for id in fires {
             let Some(job) = jobs.iter().find(|j| j.id == id) else {
                 continue;
@@ -81,11 +101,17 @@ fn main() {
                     "fired job {} ({}) -> session {} (created={})",
                     job.id, job.name, outcome.session_id, outcome.created
                 ),
-                Err(e) => eprintln!(
-                    "job {} ({}) create failed [{}]: {}",
-                    job.id, job.name, e.code, e.message
-                ),
+                Err(e) => {
+                    eprintln!(
+                        "job {} ({}) create failed [{}]: {}",
+                        job.id, job.name, e.code, e.message
+                    );
+                    failed.push(id);
+                }
             }
         }
+        // Commit advanced cursors, but roll back any job whose create failed so
+        // the occurrence retries on the next tick instead of being dropped.
+        cursors = restore_failed_cursors(&cursors, next, &failed);
     }
 }
